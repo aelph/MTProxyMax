@@ -5,7 +5,7 @@
     One script. Full control. Zero hassle.
   </p>
   <p align="center">
-    <img src="https://img.shields.io/badge/version-1.2.0-brightgreen" alt="Version"/>
+    <img src="https://img.shields.io/badge/version-1.0.0-brightgreen" alt="Version"/>
     <img src="https://img.shields.io/badge/license-MIT-blue" alt="License"/>
     <img src="https://img.shields.io/badge/engine-Rust_(telemt_3.x)-orange" alt="Engine"/>
     <img src="https://img.shields.io/badge/platform-Linux-lightgrey" alt="Platform"/>
@@ -500,7 +500,20 @@ mtproxymax telegram remove              # Remove bot completely
 
 ## 📋 Changelog
 
-### v1.2.0 — Engine v3.0.7 + Custom IP
+### v1.0.0 — Engine v3.0.15
+
+**Engine Upgrade (v3.0.7 → v3.0.15):**
+
+- **ME Connection Hardening** — Better error handling and recovery for lost middle-end connections
+- **Secure Payload Fixes** — Payload length validation and ME protocol hardening
+- **Bounded Backpressure** — Semaphore-based global gate prevents overload, ME buffer reuse for efficiency
+- **TLS Full Certificate** — New TLS fetcher drafts real certificates in ServerHello, with TTL-based refresh
+- **ME Pool Reinit** — Soft-staged reinit without reconcile, plus reinit polishing for smoother reconnects
+- **Desync Forensics** — Full forensics for desync detection and debugging
+- **ME Pool Hardswap** — Hard connection swap with softer fallback for graceful pool rotation
+- **ME Pool Health + Rotation** — Active health checking with automatic rotation of unhealthy connections
+
+### v1.0.0 — Engine v3.0.7 + Custom IP
 
 **Engine Upgrade (v3.0.4 → v3.0.7):**
 
@@ -525,7 +538,7 @@ mtproxymax telegram remove              # Remove bot completely
 - **LTO builds** — Engine compiled with Link-Time Optimization (`LTO=true`, `codegen-units=1`) for ~10-20% faster throughput
 - **No default resource caps** — Docker CPU/memory limits now default to unlimited instead of 1 core / 256MB
 
-### v1.1.0 — Per-User Limits + Telegram Bot
+### v1.0.0 — Per-User Limits + Telegram Bot
 
 - Per-user connection, IP, quota, and expiry limits
 - Telegram bot with 17 commands for remote management
@@ -547,6 +560,14 @@ mtproxymax telegram remove              # Remove bot completely
 ## 🙏 Credits
 
 Built on top of **telemt** — a high-performance MTProto proxy engine written in Rust/Tokio. All proxy protocol handling, FakeTLS, traffic masking, and per-user enforcement is powered by telemt.
+
+---
+
+## 💖 Donate
+
+If you find MTProxyMax useful, consider supporting its development:
+
+[**samnet.dev/donate**](https://www.samnet.dev/donate/)
 
 ---
 
