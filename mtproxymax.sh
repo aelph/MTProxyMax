@@ -2534,6 +2534,21 @@ restart_proxy_container() {
     run_proxy_container
 }
 
+# Parse ISO 8601 timestamp to epoch (portable: GNU date, busybox date, Python fallback)
+_iso_to_epoch() {
+    local ts="$1"
+    [ -z "$ts" ] && { echo "0"; return; }
+    # Strip sub-second precision and trailing Z (e.g. 2026-03-03T10:00:00.123456789Z -> 2026-03-03T10:00:00)
+    ts="${ts%%.*}"
+    ts="${ts%%Z}"
+    # GNU date: date -d "..." +%s
+    local epoch
+    epoch=$(date -d "${ts}" +%s 2>/dev/null) && { echo "$epoch"; return; }
+    # Busybox date: date -D '%Y-%m-%dT%H:%M:%S' -d "..." +%s
+    epoch=$(date -D '%Y-%m-%dT%H:%M:%S' -d "${ts}" +%s 2>/dev/null) && { echo "$epoch"; return; }
+    echo "0"
+}
+
 # Get container uptime
 get_proxy_uptime() {
     if ! is_proxy_running; then
@@ -2545,7 +2560,7 @@ get_proxy_uptime() {
     [ -z "$started_at" ] && { echo "0"; return; }
 
     local start_epoch now_epoch
-    start_epoch=$(date -d "${started_at}" +%s 2>/dev/null || echo "0")
+    start_epoch=$(_iso_to_epoch "$started_at")
     now_epoch=$(date +%s)
     [ "$start_epoch" -gt 0 ] 2>/dev/null && echo $((now_epoch - start_epoch)) || echo "0"
 }
@@ -3374,7 +3389,10 @@ get_stats() {
 get_uptime() {
     local sa=$(docker inspect --format '{{.State.StartedAt}}' mtproxymax 2>/dev/null)
     [ -z "$sa" ] && echo 0 && return
-    local se=$(date -d "$sa" +%s 2>/dev/null || echo 0)
+    # Portable ISO 8601 -> epoch (GNU date, busybox date)
+    sa="${sa%%.*}"; sa="${sa%%Z}"
+    local se
+    se=$(date -d "$sa" +%s 2>/dev/null) || se=$(date -D '%Y-%m-%dT%H:%M:%S' -d "$sa" +%s 2>/dev/null) || se=0
     echo $(( $(date +%s) - se ))
 }
 
@@ -5033,7 +5051,7 @@ show_main_menu() {
             if [ -z "$_cached_start_epoch" ]; then
                 local started_at
                 started_at=$(docker inspect --format '{{.State.StartedAt}}' "$CONTAINER_NAME" 2>/dev/null)
-                _cached_start_epoch=$(date -d "${started_at}" +%s 2>/dev/null || echo "0")
+                _cached_start_epoch=$(_iso_to_epoch "$started_at")
             fi
             local up_secs=$(( $(date +%s) - _cached_start_epoch ))
             uptime_str=$(format_duration "$up_secs")
