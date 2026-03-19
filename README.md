@@ -516,14 +516,16 @@ mtproxymax telegram remove              # Remove bot completely
 - **`--no-restart` flag** — `secret add/remove/add-batch/remove-batch --no-restart` for scripting and automation
 - **TUI options** — Interactive menu options [6] and [7] for batch operations
 
-### v1.0.0 — Engine v3.3.22
+### v1.0.0 — Engine v3.3.25
 
-**Engine Upgrade (v3.3.3 → v3.3.22):**
+**Engine Upgrade (v3.3.3 → v3.3.25):**
 
+- **Instadrain + Hard-Remove** — Writers stuck in draining state are now force-removed, reducing random connection drops
+- **Runtime Guardrails** — Internal safety checks to prevent resource exhaustion
+- **ME Writer Draining Fixes** — Stuck draining writers properly cleaned up instead of hanging
 - **Adaptive Buffers** — Dynamic buffer sizing: less RAM at low load, more throughput at high load
 - **Session Eviction** — Smarter cleanup of idle/dead connections under memory pressure
 - **Flow Performance** — 3x faster D2C flush (1500μs → 500μs) + immediate ACK flushing for lower latency
-- **Tighter Timeouts** — Keepalive 60s → 15s, ACK 300s → 90s for faster dead-connection cleanup
 - **Hot-Reload Fixes** — More reliable config reload without restart
 - **Configurable max_connections** — New option to cap total connections (default: 10000)
 - **Event-Driven ME** — Pool switches from busy-polling to event-driven, reducing CPU on idle servers
