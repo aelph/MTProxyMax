@@ -516,21 +516,22 @@ mtproxymax telegram remove              # Remove bot completely
 - **`--no-restart` flag** — `secret add/remove/add-batch/remove-batch --no-restart` for scripting and automation
 - **TUI options** — Interactive menu options [6] and [7] for batch operations
 
-### v1.0.0 — Engine v3.3.25
+### v1.0.0 — Engine v3.3.28
 
-**Engine Upgrade (v3.3.3 → v3.3.25):**
+**Engine Upgrade (v3.3.3 → v3.3.28):**
 
-- **Instadrain + Hard-Remove** — Writers stuck in draining state are now force-removed, reducing random connection drops
-- **Runtime Guardrails** — Internal safety checks to prevent resource exhaustion
-- **ME Writer Draining Fixes** — Stuck draining writers properly cleaned up instead of hanging
+- **ME Anti-Stuck + Orphan Watchdog** — Root cause fix for random connection drops: writer cleanup races resolved, orphaned writers detected and force-closed
+- **Quarantine Fixes** — Quarantined endpoints no longer bypass the circuit breaker, preventing flapping reconnection loops
+- **Authoritative Teardown** — New deterministic writer teardown sequence with force-close safety policy
+- **ME Draining on Dual-Stack** — Proper draining behavior on IPv4+IPv6 servers
+- **TLS Fetcher Upstream Selection** — Smarter upstream selection for TLS fetching
+- **Teardown Monitoring** — New API and Prometheus metrics for writer teardown visibility
+- **Instadrain + Hard-Remove** — Writers stuck draining are force-removed instead of hanging
 - **Adaptive Buffers** — Dynamic buffer sizing: less RAM at low load, more throughput at high load
-- **Session Eviction** — Smarter cleanup of idle/dead connections under memory pressure
-- **Flow Performance** — 3x faster D2C flush (1500μs → 500μs) + immediate ACK flushing for lower latency
-- **Hot-Reload Fixes** — More reliable config reload without restart
-- **Configurable max_connections** — New option to cap total connections (default: 10000)
+- **Flow Performance** — 3x faster D2C flush + immediate ACK flushing for lower latency
+- **Hot-Reload Fixes** — Reliable config reload without restart
 - **Event-Driven ME** — Pool switches from busy-polling to event-driven, reducing CPU on idle servers
 - **CPU/RAM Hot-Path Optimization** — Removed hot-path obstacles for lower resource usage under load
-- **ME Writer Rebinding** — Lifecycle fixes: proper cleanup of stale writers, faster recovery after drops
 - **Source-IP ME Routing** — Routing decisions factor in source IP for multi-homed servers
 - **ME/DC Reroute** — Dynamic rerouting when preferred datacenter path degrades
 - **Per-Upstream Runtime Selftest** — Built-in diagnostics for upstream connectivity

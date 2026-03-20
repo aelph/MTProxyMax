@@ -22,8 +22,8 @@ UPSTREAMS_FILE="${INSTALL_DIR}/upstreams.conf"
 BACKUP_DIR="${INSTALL_DIR}/backups"
 CONTAINER_NAME="mtproxymax"
 DOCKER_IMAGE_BASE="mtproxymax-telemt"
-TELEMT_MIN_VERSION="3.3.25"
-TELEMT_COMMIT="67dc1e8"  # Pinned: v3.3.25 — Instadrain, runtime guardrails, ME writer draining fixes
+TELEMT_MIN_VERSION="3.3.28"
+TELEMT_COMMIT="342b011"  # Pinned: v3.3.28 — ME anti-stuck, quarantine fixes, orphan watchdog, dual-stack draining
 GITHUB_REPO="SamNet-dev/MTProxyMax"
 REGISTRY_IMAGE="ghcr.io/samnet-dev/mtproxymax-telemt"
 
