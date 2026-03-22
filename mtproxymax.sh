@@ -104,6 +104,7 @@ PROXY_CPUS=""
 PROXY_MEMORY=""
 CUSTOM_IP=""
 FAKE_CERT_LEN=2048
+PROXY_PROTOCOL="false"
 AD_TAG=""
 BLOCKLIST_COUNTRIES=""
 MASKING_ENABLED="true"
@@ -553,6 +554,7 @@ PROXY_CPUS='${PROXY_CPUS}'
 PROXY_MEMORY='${PROXY_MEMORY}'
 CUSTOM_IP='${CUSTOM_IP}'
 FAKE_CERT_LEN='${FAKE_CERT_LEN}'
+PROXY_PROTOCOL='${PROXY_PROTOCOL}'
 
 # Ad-Tag (from @MTProxyBot)
 AD_TAG='${AD_TAG}'
@@ -604,7 +606,7 @@ load_settings() {
         # Whitelist of allowed keys
         case "$key" in
             PROXY_PORT|PROXY_METRICS_PORT|PROXY_DOMAIN|PROXY_CONCURRENCY|\
-            PROXY_CPUS|PROXY_MEMORY|CUSTOM_IP|FAKE_CERT_LEN|AD_TAG|BLOCKLIST_COUNTRIES|\
+            PROXY_CPUS|PROXY_MEMORY|CUSTOM_IP|FAKE_CERT_LEN|PROXY_PROTOCOL|AD_TAG|BLOCKLIST_COUNTRIES|\
             MASKING_ENABLED|MASKING_HOST|MASKING_PORT|\
             TELEGRAM_ENABLED|TELEGRAM_BOT_TOKEN|TELEGRAM_CHAT_ID|\
             TELEGRAM_INTERVAL|TELEGRAM_ALERTS_ENABLED|TELEGRAM_SERVER_LABEL|\
@@ -620,6 +622,7 @@ load_settings() {
     [[ "$MASKING_PORT" =~ ^[0-9]+$ ]] && [ "$MASKING_PORT" -ge 1 ] && [ "$MASKING_PORT" -le 65535 ] || MASKING_PORT=443
     [[ "$FAKE_CERT_LEN" =~ ^[0-9]+$ ]] && [ "$FAKE_CERT_LEN" -ge 512 ] || FAKE_CERT_LEN=2048
     [[ "$PROXY_CONCURRENCY" =~ ^[0-9]+$ ]] || PROXY_CONCURRENCY=8192
+    [[ "$PROXY_PROTOCOL" == "true" ]] || PROXY_PROTOCOL="false"
     [[ "$TELEGRAM_INTERVAL" =~ ^[0-9]+$ ]] || TELEGRAM_INTERVAL=6
     [[ "$TELEGRAM_CHAT_ID" =~ ^-?[0-9]+$ ]] || TELEGRAM_CHAT_ID=""
 }
@@ -1039,6 +1042,7 @@ show = [$(get_enabled_labels_quoted)]
 port = ${port}
 listen_addr_ipv4 = "0.0.0.0"
 listen_addr_ipv6 = "::"
+proxy_protocol = ${PROXY_PROTOCOL:-false}
 metrics_port = ${metrics_port}
 metrics_whitelist = ["127.0.0.1", "::1"]
 
@@ -3290,7 +3294,7 @@ load_tg_settings() {
             local key="${BASH_REMATCH[1]}" val="${BASH_REMATCH[2]}"
             case "$key" in
                 PROXY_PORT|PROXY_DOMAIN|PROXY_METRICS_PORT|PROXY_CONCURRENCY|\
-                PROXY_CPUS|PROXY_MEMORY|CUSTOM_IP|MASKING_ENABLED|MASKING_HOST|MASKING_PORT|\
+                PROXY_CPUS|PROXY_MEMORY|CUSTOM_IP|PROXY_PROTOCOL|MASKING_ENABLED|MASKING_HOST|MASKING_PORT|\
                 AD_TAG|BLOCKLIST_COUNTRIES|AUTO_UPDATE_ENABLED|\
                 TELEGRAM_ENABLED|TELEGRAM_BOT_TOKEN|TELEGRAM_CHAT_ID|\
                 TELEGRAM_INTERVAL|TELEGRAM_SERVER_LABEL|TELEGRAM_ALERTS_ENABLED)
@@ -5364,6 +5368,7 @@ show_settings_menu() {
         echo -e "  ${BOLD}Masking:${NC}     ${MASKING_ENABLED}"
         echo -e "  ${BOLD}Ad-tag:${NC}      ${AD_TAG:-${DIM}not set${NC}}"
         echo -e "  ${BOLD}Auto-update:${NC} ${AUTO_UPDATE_ENABLED}"
+        echo -e "  ${BOLD}PROXY proto:${NC} ${PROXY_PROTOCOL}"
         echo -e "  ${BOLD}Engine:${NC}      telemt v$(get_telemt_version)"
         echo ""
         echo -e "  ${DIM}[1]${NC} Change port"
@@ -5373,7 +5378,8 @@ show_settings_menu() {
         echo -e "  ${DIM}[5]${NC} Toggle traffic masking"
         echo -e "  ${DIM}[6]${NC} Set ad-tag"
         echo -e "  ${DIM}[7]${NC} Toggle auto-update"
-        echo -e "  ${DIM}[8]${NC} Engine Management"
+        echo -e "  ${DIM}[8]${NC} Toggle PROXY protocol"
+        echo -e "  ${DIM}[9]${NC} Engine Management"
         echo -e "  ${DIM}[0]${NC} Back"
 
         local choice
@@ -5519,7 +5525,18 @@ show_settings_menu() {
                 log_success "Auto-update: ${AUTO_UPDATE_ENABLED}"
                 press_any_key
                 ;;
-            8) show_engine_menu ;;
+            8)
+                [ "$PROXY_PROTOCOL" = "true" ] && PROXY_PROTOCOL="false" || PROXY_PROTOCOL="true"
+                save_settings
+                log_success "PROXY protocol: ${PROXY_PROTOCOL}"
+                if is_proxy_running; then
+                    echo -en "  ${DIM}Restart proxy now? [Y/n]:${NC} "
+                    local r; read -r r
+                    [[ ! "$r" =~ ^[nN] ]] && { load_secrets; restart_proxy_container || true; }
+                fi
+                press_any_key
+                ;;
+            9) show_engine_menu ;;
             0|"") return ;;
             *) ;;
         esac
