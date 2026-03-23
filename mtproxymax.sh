@@ -106,6 +106,7 @@ CUSTOM_IP=""
 FAKE_CERT_LEN=2048
 PROXY_PROTOCOL="false"
 AD_TAG=""
+GEOBLOCK_MODE="blacklist"
 BLOCKLIST_COUNTRIES=""
 MASKING_ENABLED="true"
 MASKING_HOST=""
@@ -573,6 +574,7 @@ PROXY_PROTOCOL='${PROXY_PROTOCOL}'
 AD_TAG='${AD_TAG}'
 
 # Geo-Blocking
+GEOBLOCK_MODE='${GEOBLOCK_MODE}'
 BLOCKLIST_COUNTRIES='${BLOCKLIST_COUNTRIES}'
 
 # Traffic Masking
@@ -619,7 +621,7 @@ load_settings() {
         # Whitelist of allowed keys
         case "$key" in
             PROXY_PORT|PROXY_METRICS_PORT|PROXY_DOMAIN|PROXY_CONCURRENCY|\
-            PROXY_CPUS|PROXY_MEMORY|CUSTOM_IP|FAKE_CERT_LEN|PROXY_PROTOCOL|AD_TAG|BLOCKLIST_COUNTRIES|\
+            PROXY_CPUS|PROXY_MEMORY|CUSTOM_IP|FAKE_CERT_LEN|PROXY_PROTOCOL|AD_TAG|GEOBLOCK_MODE|BLOCKLIST_COUNTRIES|\
             MASKING_ENABLED|MASKING_HOST|MASKING_PORT|\
             TELEGRAM_ENABLED|TELEGRAM_BOT_TOKEN|TELEGRAM_CHAT_ID|\
             TELEGRAM_INTERVAL|TELEGRAM_ALERTS_ENABLED|TELEGRAM_SERVER_LABEL|\
@@ -636,6 +638,7 @@ load_settings() {
     [[ "$FAKE_CERT_LEN" =~ ^[0-9]+$ ]] && [ "$FAKE_CERT_LEN" -ge 512 ] || FAKE_CERT_LEN=2048
     [[ "$PROXY_CONCURRENCY" =~ ^[0-9]+$ ]] || PROXY_CONCURRENCY=8192
     [[ "$PROXY_PROTOCOL" == "true" ]] || PROXY_PROTOCOL="false"
+    [[ "$GEOBLOCK_MODE" == "whitelist" ]] || GEOBLOCK_MODE="blacklist"
     [[ "$TELEGRAM_INTERVAL" =~ ^[0-9]+$ ]] || TELEGRAM_INTERVAL=6
     [[ "$TELEGRAM_CHAT_ID" =~ ^-?[0-9]+$ ]] || TELEGRAM_CHAT_ID=""
 }
@@ -2679,16 +2682,27 @@ _apply_country_rules() {
     awk -v s="$setname" 'NF && !/^#/ { print "add " s " " $1 }' "$cache_file" \
         | ipset restore -exist
 
-    # Add iptables DROP rule if not already present
-    if ! iptables -C INPUT -m set --match-set "$setname" src \
-        -p tcp --dport "$PROXY_PORT" \
-        -m comment --comment "$GEOBLOCK_COMMENT" -j DROP 2>/dev/null; then
-        iptables -I INPUT -m set --match-set "$setname" src \
+    if [ "$GEOBLOCK_MODE" = "whitelist" ]; then
+        # Whitelist: ACCEPT matching countries
+        if ! iptables -C INPUT -m set --match-set "$setname" src \
             -p tcp --dport "$PROXY_PORT" \
-            -m comment --comment "$GEOBLOCK_COMMENT" -j DROP
+            -m comment --comment "$GEOBLOCK_COMMENT" -j ACCEPT 2>/dev/null; then
+            iptables -I INPUT -m set --match-set "$setname" src \
+                -p tcp --dport "$PROXY_PORT" \
+                -m comment --comment "$GEOBLOCK_COMMENT" -j ACCEPT
+        fi
+    else
+        # Blacklist: DROP matching countries
+        if ! iptables -C INPUT -m set --match-set "$setname" src \
+            -p tcp --dport "$PROXY_PORT" \
+            -m comment --comment "$GEOBLOCK_COMMENT" -j DROP 2>/dev/null; then
+            iptables -I INPUT -m set --match-set "$setname" src \
+                -p tcp --dport "$PROXY_PORT" \
+                -m comment --comment "$GEOBLOCK_COMMENT" -j DROP
+        fi
     fi
 
-    log_success "Geo-blocking active for ${code^^} (port ${PROXY_PORT})"
+    log_success "Geo-${GEOBLOCK_MODE} active for ${code^^} (port ${PROXY_PORT})"
 }
 
 # Remove iptables rules and ipset for one country
@@ -2696,13 +2710,33 @@ _remove_country_rules() {
     local code="$1"
     local setname="${GEOBLOCK_IPSET_PREFIX}${code}"
 
-    # Remove iptables rule
+    # Remove iptables rule (try both DROP and ACCEPT for mode compatibility)
     iptables -D INPUT -m set --match-set "$setname" src \
         -p tcp --dport "$PROXY_PORT" \
         -m comment --comment "$GEOBLOCK_COMMENT" -j DROP 2>/dev/null || true
+    iptables -D INPUT -m set --match-set "$setname" src \
+        -p tcp --dport "$PROXY_PORT" \
+        -m comment --comment "$GEOBLOCK_COMMENT" -j ACCEPT 2>/dev/null || true
 
     # Destroy ipset
     ipset destroy "$setname" 2>/dev/null || true
+}
+
+# Remove whitelist default-DROP rule
+_remove_default_drop() {
+    iptables -D INPUT -p tcp --dport "$PROXY_PORT" \
+        -m comment --comment "${GEOBLOCK_COMMENT}-default" -j DROP 2>/dev/null || true
+}
+
+# Add whitelist default-DROP rule if in whitelist mode and countries exist
+_ensure_default_drop() {
+    [ "$GEOBLOCK_MODE" = "whitelist" ] || return 0
+    [ -n "$BLOCKLIST_COUNTRIES" ] || return 0
+    if ! iptables -C INPUT -p tcp --dport "$PROXY_PORT" \
+        -m comment --comment "${GEOBLOCK_COMMENT}-default" -j DROP 2>/dev/null; then
+        iptables -A INPUT -p tcp --dport "$PROXY_PORT" \
+            -m comment --comment "${GEOBLOCK_COMMENT}-default" -j DROP
+    fi
 }
 
 # Reapply all saved geoblock rules (called on proxy start)
@@ -2718,13 +2752,16 @@ geoblock_reapply_all() {
             _apply_country_rules "$code" &>/dev/null || true
         fi
     done
+
+    # Whitelist mode: add default DROP for proxy port at the end (after all ACCEPTs)
+    _ensure_default_drop
 }
 
 # Remove ALL mtproxymax geoblock rules (called on uninstall)
 geoblock_remove_all() {
-    # Remove all tagged iptables rules
+    # Remove all tagged iptables rules (both geoblock and geoblock-default)
     if command -v iptables &>/dev/null; then
-        iptables-save 2>/dev/null | grep -- "--comment ${GEOBLOCK_COMMENT}" | \
+        iptables-save 2>/dev/null | grep -E -- "--comment ${GEOBLOCK_COMMENT}(-default)?" | \
             sed 's/^-A/-D/' | while IFS= read -r rule; do
                 iptables $rule 2>/dev/null || true
             done
@@ -2749,11 +2786,13 @@ show_geoblock_menu() {
         clear_screen
         draw_header "GEO-BLOCKING"
         echo ""
-        echo -e "  ${BOLD}Current blocklist:${NC} ${BLOCKLIST_COUNTRIES:-${DIM}none${NC}}"
+        echo -e "  ${BOLD}Mode:${NC}      ${GEOBLOCK_MODE}"
+        echo -e "  ${BOLD}Countries:${NC} ${BLOCKLIST_COUNTRIES:-${DIM}none${NC}}"
         echo ""
         echo -e "  ${DIM}[1]${NC} Add country"
         echo -e "  ${DIM}[2]${NC} Remove country"
         echo -e "  ${DIM}[3]${NC} Clear all"
+        echo -e "  ${DIM}[4]${NC} Toggle mode (blacklist/whitelist)"
         echo -e "  ${DIM}[0]${NC} Back"
 
         local choice
@@ -2771,12 +2810,13 @@ show_geoblock_menu() {
                 code=$(echo "$code" | tr '[:upper:]' '[:lower:]')
                 if [[ "$code" =~ ^[a-z]{2}$ ]]; then
                     if echo ",$BLOCKLIST_COUNTRIES," | grep -q ",${code},"; then
-                        log_info "Country '${code}' is already blocked"
+                        log_info "Country '${code}' is already in the list"
                     else
                         _ensure_ipset && _download_country_cidrs "$code" && {
                             [ -z "$BLOCKLIST_COUNTRIES" ] && BLOCKLIST_COUNTRIES="$code" || BLOCKLIST_COUNTRIES="${BLOCKLIST_COUNTRIES},${code}"
                             save_settings
                             _apply_country_rules "$code"
+                            _ensure_default_drop
                         }
                     fi
                 else
@@ -2795,9 +2835,11 @@ show_geoblock_menu() {
                         save_settings
                         _remove_country_rules "$rm_code"
                         rm -f "${GEOBLOCK_CACHE_DIR}/${rm_code}.zone"
+                        # Remove default-DROP if no countries left in whitelist mode
+                        [ -z "$BLOCKLIST_COUNTRIES" ] && _remove_default_drop
                         log_success "Removed ${rm_code^^} — rules and cache cleared"
                     else
-                        log_info "Country '${rm_code}' is not in the blocklist"
+                        log_info "Country '${rm_code}' is not in the list"
                     fi
                 else
                     log_error "Invalid country code (use 2-letter ISO code)"
@@ -2812,9 +2854,22 @@ show_geoblock_menu() {
                     _remove_country_rules "$code"
                     rm -f "${GEOBLOCK_CACHE_DIR}/${code}.zone"
                 done
+                _remove_default_drop
                 BLOCKLIST_COUNTRIES=""
                 save_settings
                 log_success "All geo-blocks cleared"
+                press_any_key
+                ;;
+            4)
+                # Remove all current rules before switching mode
+                geoblock_remove_all
+                _remove_default_drop
+                # Toggle mode
+                [ "$GEOBLOCK_MODE" = "blacklist" ] && GEOBLOCK_MODE="whitelist" || GEOBLOCK_MODE="blacklist"
+                save_settings
+                # Reapply rules in new mode
+                [ -n "$BLOCKLIST_COUNTRIES" ] && geoblock_reapply_all
+                log_success "Geo-blocking mode: ${GEOBLOCK_MODE}"
                 press_any_key
                 ;;
             0|"") return ;;
@@ -3310,7 +3365,7 @@ load_tg_settings() {
             case "$key" in
                 PROXY_PORT|PROXY_DOMAIN|PROXY_METRICS_PORT|PROXY_CONCURRENCY|\
                 PROXY_CPUS|PROXY_MEMORY|CUSTOM_IP|PROXY_PROTOCOL|MASKING_ENABLED|MASKING_HOST|MASKING_PORT|\
-                AD_TAG|BLOCKLIST_COUNTRIES|AUTO_UPDATE_ENABLED|\
+                AD_TAG|GEOBLOCK_MODE|BLOCKLIST_COUNTRIES|AUTO_UPDATE_ENABLED|\
                 TELEGRAM_ENABLED|TELEGRAM_BOT_TOKEN|TELEGRAM_CHAT_ID|\
                 TELEGRAM_INTERVAL|TELEGRAM_SERVER_LABEL|TELEGRAM_ALERTS_ENABLED)
                     printf -v "$key" '%s' "$val" ;;
@@ -4592,6 +4647,8 @@ cli_main() {
             fi
             check_root
             if validate_port "$new_port"; then
+                # Remove geoblock rules on old port before changing
+                [ -n "$BLOCKLIST_COUNTRIES" ] && { geoblock_remove_all; _remove_default_drop; }
                 PROXY_PORT="$new_port"
                 save_settings
                 log_success "Port changed to ${new_port}"
@@ -4723,6 +4780,7 @@ cli_main() {
                                 [ -z "$BLOCKLIST_COUNTRIES" ] && BLOCKLIST_COUNTRIES="$code" || BLOCKLIST_COUNTRIES="${BLOCKLIST_COUNTRIES},${code}"
                                 save_settings
                                 _apply_country_rules "$code"
+                                _ensure_default_drop
                             }
                         fi
                     else
@@ -4738,6 +4796,7 @@ cli_main() {
                             save_settings
                             _remove_country_rules "$code"
                             rm -f "${GEOBLOCK_CACHE_DIR}/${code}.zone"
+                            [ -z "$BLOCKLIST_COUNTRIES" ] && _remove_default_drop
                             log_success "Removed ${code^^} — rules and cache cleared"
                         else
                             log_info "Country '${code^^}' is not blocked"
@@ -4755,6 +4814,7 @@ cli_main() {
                         _remove_country_rules "$code"
                         rm -f "${GEOBLOCK_CACHE_DIR}/${code}.zone"
                     done
+                    _remove_default_drop
                     BLOCKLIST_COUNTRIES=""
                     save_settings
                     log_success "All geo-blocks cleared"
@@ -5406,6 +5466,8 @@ show_settings_menu() {
                 echo -en "  ${BOLD}New port:${NC} "
                 local p; read -r p
                 if validate_port "$p"; then
+                    # Remove geoblock rules on old port before changing
+                    [ -n "$BLOCKLIST_COUNTRIES" ] && { geoblock_remove_all; _remove_default_drop; }
                     PROXY_PORT="$p"
                     save_settings
                     log_success "Port set to ${p}"
