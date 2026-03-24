@@ -1174,7 +1174,7 @@ TOML_EOF
     done
 
     chmod 644 "$tmp"
-    mv "$tmp" "${CONFIG_DIR}/config.toml"
+    cp "$tmp" "${CONFIG_DIR}/config.toml" && rm -f "$tmp"
 }
 
 # Get comma-separated quoted list of enabled labels for config
