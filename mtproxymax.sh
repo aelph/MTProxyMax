@@ -4937,6 +4937,8 @@ show_cli_help() {
     echo ""
     echo -e "  ${BOLD}Monitoring:${NC}"
     echo -e "    ${GREEN}traffic${NC}                 Show traffic stats"
+    echo -e "    ${GREEN}metrics${NC}                 Show live engine metrics (connections, upstream, users, ME)"
+    echo -e "    ${GREEN}metrics live${NC} [seconds]  Auto-refresh metrics dashboard (default: 5s)"
     echo -e "    ${GREEN}logs${NC}                    Stream container logs"
     echo -e "    ${GREEN}health${NC}                  Run health diagnostics"
     echo ""
@@ -5022,6 +5024,136 @@ show_status_json() {
     done
     printf '\n  ]\n'
     printf '}\n'
+}
+
+show_metrics() {
+    local m
+    if ! m=$(_fetch_metrics 2>/dev/null); then
+        log_error "Metrics endpoint unavailable — is the proxy running?"
+        return 1
+    fi
+
+    # Single awk pass: S| = scalars, D| = duration buckets, U| = per-user
+    local parsed
+    parsed=$(echo "$m" | awk '
+        function lbl(s, k,    p, q) {
+            p = index(s, k "=\""); if (!p) return ""
+            s = substr(s, p + length(k) + 2)
+            q = index(s, "\""); return q ? substr(s, 1, q-1) : ""
+        }
+        /^telemt_uptime_seconds /                           { uptime = $NF }
+        /^telemt_connections_total /                        { c_tot  = $NF }
+        /^telemt_connections_bad_total /                    { c_bad  = $NF }
+        /^telemt_connections_current /                      { c_cur  = $NF }
+        /^telemt_connections_me_current /                   { c_me   = $NF }
+        /^telemt_connections_direct_current /               { c_dir  = $NF }
+        /^telemt_upstream_connect_attempt_total /           { up_att = $NF }
+        /^telemt_upstream_connect_success_total /           { up_ok  = $NF }
+        /^telemt_upstream_connect_fail_total /              { up_fail= $NF }
+        /^telemt_me_reconnect_attempts_total /              { me_att = $NF }
+        /^telemt_me_reconnect_success_total /               { me_ok  = $NF }
+        /^telemt_me_writers_active_current /                { me_wa  = $NF }
+        /^telemt_me_writers_warm_current /                  { me_ww  = $NF }
+        /^telemt_me_endpoint_quarantine_total /             { me_quar= $NF }
+        /^telemt_me_crc_mismatch_total /                    { me_crc = $NF }
+        /^telemt_pool_drain_active /                        { pool   = $NF }
+        /^telemt_desync_total /                             { desync = $NF }
+        /^telemt_secure_padding_invalid_total /             { padinv = $NF }
+        /^telemt_upstream_connect_duration_success_total\{/ { b=lbl($0,"bucket"); if(b) ds[b]+=$NF }
+        /^telemt_upstream_connect_duration_fail_total\{/    { b=lbl($0,"bucket"); if(b) df[b]+=$NF }
+        /^telemt_user_connections_current\{/ { u=lbl($0,"user"); if(u) uc[u]+=$NF }
+        /^telemt_user_connections_total\{/   { u=lbl($0,"user"); if(u) ut[u]+=$NF }
+        /^telemt_user_octets_from_client\{/  { u=lbl($0,"user"); if(u) rx[u]+=$NF }
+        /^telemt_user_octets_to_client\{/    { u=lbl($0,"user"); if(u) tx[u]+=$NF }
+        /^telemt_user_unique_ips_current\{/  { u=lbl($0,"user"); if(u) ui[u]+=$NF }
+        END {
+            printf "S|%.0f|%.0f|%.0f|%.0f|%.0f|%.0f|%.0f|%.0f|%.0f|%.0f|%.0f|%.0f|%.0f|%.0f|%.0f|%.0f|%.0f|%.0f\n",
+                uptime+0,c_tot+0,c_bad+0,c_cur+0,c_me+0,c_dir+0,
+                up_att+0,up_ok+0,up_fail+0,me_att+0,me_ok+0,
+                me_wa+0,me_ww+0,me_quar+0,me_crc+0,pool+0,desync+0,padinv+0
+            bkeys[1]="le_100ms";   bnames[1]="<=100ms"
+            bkeys[2]="101_500ms";  bnames[2]="101-500ms"
+            bkeys[3]="501_1000ms"; bnames[3]="501ms-1s"
+            bkeys[4]="gt_1000ms";  bnames[4]=">1s"
+            for (i=1;i<=4;i++) {
+                b=bkeys[i]; ok=ds[b]+0; fail=df[b]+0; tot=ok+fail
+                printf "D|%s|%s|%.0f|%.0f|%.1f\n", b, bnames[i], ok, fail, (tot>0 ? ok/tot*100 : -1)
+            }
+            for (u in uc) users[u]=1
+            for (u in rx) users[u]=1
+            for (u in tx) users[u]=1
+            for (u in ui) users[u]=1
+            for (u in users)
+                printf "U|%s|%.0f|%.0f|%.0f|%.0f|%.0f\n", u, uc[u]+0, ut[u]+0, rx[u]+0, tx[u]+0, ui[u]+0
+        }
+    ')
+
+    # Parse scalar line
+    local uptime c_tot c_bad c_cur c_me c_dir up_att up_ok up_fail me_att me_ok me_wa me_ww me_quar me_crc pool desync padinv
+    IFS='|' read -r _ uptime c_tot c_bad c_cur c_me c_dir up_att up_ok up_fail \
+                       me_att me_ok me_wa me_ww me_quar me_crc pool desync padinv \
+        <<< "$(echo "$parsed" | grep '^S|')"
+
+    local c_good=$(( ${c_tot:-0} - ${c_bad:-0} ))
+    local up_rate=0 me_rate=0
+    [ "${up_att:-0}" -gt 0 ] && up_rate=$(awk -v a="$up_att" -v b="$up_ok" 'BEGIN{printf "%.1f", b/a*100}')
+    [ "${me_att:-0}" -gt 0 ] && me_rate=$(awk -v a="$me_att" -v b="$me_ok" 'BEGIN{printf "%.1f", b/a*100}')
+
+    local up_status
+    if   [ "${up_att:-0}" -eq 0 ]; then
+        up_status="${DIM}—${NC}"
+    elif awk -v r="$up_rate" 'BEGIN{exit !(r+0 >= 95)}'; then
+        up_status="${BRIGHT_GREEN}OK${NC} ${up_rate}%"
+    elif awk -v r="$up_rate" 'BEGIN{exit !(r+0 >= 80)}'; then
+        up_status="${YELLOW}WARN${NC} ${up_rate}%"
+    else
+        up_status="${BRIGHT_RED}CRIT${NC} ${up_rate}%"
+    fi
+
+    local me_rate_disp
+    [ "${me_att:-0}" -gt 0 ] && me_rate_disp="${me_rate}%" || me_rate_disp="—"
+
+    draw_header "METRICS"
+    echo -e "  ${DIM}uptime:${NC} $(format_duration "${uptime:-0}")   ${DIM}upstream:${NC} ${up_status}   ${DIM}active:${NC} ${c_cur:-0}   ${DIM}writers:${NC} ${me_wa:-0}/${me_ww:-0}"
+    echo ""
+
+    echo -e "  ${BOLD}Connections${NC}"
+    echo -e "  ${DIM}total:${NC} ${c_tot:-0}   ${DIM}authorized:${NC} ${BRIGHT_GREEN}${c_good}${NC}   ${DIM}rejected:${NC} ${BRIGHT_RED}${c_bad:-0}${NC}"
+    echo -e "  ${DIM}active:${NC} ${c_cur:-0}  (ME: ${c_me:-0}  direct: ${c_dir:-0})"
+    echo ""
+
+    echo -e "  ${BOLD}Upstream${NC}"
+    echo -e "  ${DIM}attempts:${NC} ${up_att:-0}   ${DIM}success:${NC} ${BRIGHT_GREEN}${up_ok:-0}${NC}   ${DIM}failed:${NC} ${BRIGHT_RED}${up_fail:-0}${NC}   ${DIM}rate:${NC} ${up_status}"
+    while IFS='|' read -r _ bk bn ok fail pct; do
+        local ppct
+        ppct=$(awk -v p="$pct" 'BEGIN{if(p+0<0) print "—"; else printf "%.0f%%", p}')
+        printf "    %-12s  %6s ok  %6s fail  (%s)\n" "$bn" "$ok" "$fail" "$ppct"
+    done < <(echo "$parsed" | grep '^D|')
+    echo ""
+
+    local user_lines
+    user_lines=$(echo "$parsed" | grep '^U|' | sort -t'|' -k3 -rn)
+    if [ -n "$user_lines" ]; then
+        echo -e "  ${BOLD}Users${NC}"
+        while IFS='|' read -r _ uname ucur utot urx utx uips; do
+            echo -e "  ${GREEN}${SYM_OK}${NC} ${BOLD}${uname}${NC}  active: ${ucur}  total: ${utot}  ${SYM_DOWN} $(format_bytes "$urx")  ${SYM_UP} $(format_bytes "$utx")  IPs: ${uips}"
+        done <<< "$user_lines"
+        echo ""
+    fi
+
+    echo -e "  ${BOLD}ME Health${NC}"
+    echo -e "  ${DIM}reconnects:${NC} ${me_ok:-0}/${me_att:-0} (${me_rate_disp})   ${DIM}writers:${NC} ${me_wa:-0} active / ${me_ww:-0} warm"
+    [ "${me_quar:-0}" -gt 0 ] && echo -e "  ${DIM}quarantined endpoints:${NC} ${YELLOW}${me_quar}${NC}"
+    [ "${me_crc:-0}"  -gt 0 ] && echo -e "  ${DIM}CRC mismatches:${NC}       ${YELLOW}${me_crc}${NC}"
+    [ "${pool:-0}"    -gt 0 ] && echo -e "  ${DIM}writers draining:${NC}     ${pool}"
+    echo ""
+
+    if [ "${desync:-0}" -gt 0 ] || [ "${padinv:-0}" -gt 0 ]; then
+        echo -e "  ${BOLD}Security${NC}"
+        [ "${desync:-0}"  -gt 0 ] && echo -e "  ${DIM}desync events:${NC}   ${YELLOW}${desync}${NC}"
+        [ "${padinv:-0}"  -gt 0 ] && echo -e "  ${DIM}invalid padding:${NC} ${YELLOW}${padinv}${NC}"
+        echo ""
+    fi
 }
 
 show_status() {
@@ -5442,6 +5574,26 @@ cli_main() {
                 echo -e "  ${GREEN}${SYM_OK}${NC} ${BOLD}${label}${NC}: ${SYM_DOWN} $(format_bytes "$u_in")  ${SYM_UP} $(format_bytes "$u_out")  conns: ${u_conns}"
             done
             echo ""
+            ;;
+
+        metrics)
+            load_settings
+            local subcmd="${1:-}"
+            if [ "$subcmd" = "live" ]; then
+                local interval="${2:-5}"
+                [[ "$interval" =~ ^[0-9]+$ ]] && [ "$interval" -ge 1 ] || interval=5
+                (
+                    while true; do
+                        tput clear 2>/dev/null || printf '\033[2J\033[H'
+                        show_metrics
+                        echo -e "  ${DIM}[live — refreshing every ${interval}s, Ctrl+C to stop]${NC}"
+                        sleep "$interval"
+                    done
+                )
+                echo ""
+            else
+                show_metrics
+            fi
             ;;
 
         logs)
