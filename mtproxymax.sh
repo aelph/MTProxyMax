@@ -2175,6 +2175,35 @@ secret_reenable() {
     log_success "Secret '${label}' re-enabled"
 }
 
+# Reset traffic counters for a secret (or all)
+secret_reset_traffic() {
+    local label="${1:-}"
+    [ -z "$label" ] && { log_error "Usage: mtproxymax secret reset-traffic <label|all>"; return 1; }
+
+    local _ut="${STATS_DIR}/user_traffic"
+    local _snap="${STATS_DIR}/user_traffic_snapshot"
+    local _qa="${STATS_DIR}/.quota_alerts_sent"
+
+    if [ "$label" = "all" ]; then
+        : > "$_ut" 2>/dev/null || true
+        : > "$_snap" 2>/dev/null || true
+        : > "$_qa" 2>/dev/null || true
+        log_success "Traffic counters reset for all users"
+    else
+        # Verify label exists
+        local found=false i
+        for i in "${!SECRETS_LABELS[@]}"; do
+            [ "${SECRETS_LABELS[$i]}" = "$label" ] && { found=true; break; }
+        done
+        [ "$found" = "false" ] && { log_error "Secret '${label}' not found"; return 1; }
+
+        for f in "$_ut" "$_snap" "$_qa"; do
+            [ -f "$f" ] && { grep -v "^${label}|" "$f" > "${f}.tmp" 2>/dev/null || true; mv "${f}.tmp" "$f" 2>/dev/null || true; }
+        done
+        log_success "Traffic counters reset for '${label}'"
+    fi
+}
+
 # Show limits for a secret
 secret_show_limits() {
     local label="${1:-}"
@@ -4918,6 +4947,7 @@ show_cli_help() {
     echo -e "    ${GREEN}secret limits${NC} [label]   Show user limits"
     echo -e "    ${GREEN}secret setlimit${NC} <label> conns|ips|quota|expires <value> [--no-restart]"
     echo -e "    ${GREEN}secret setlimits${NC} <label> <conns> <ips> <quota> [expires] [--no-restart]"
+    echo -e "    ${GREEN}secret reset-traffic${NC} <label|all>  Reset traffic counters"
     echo -e "    ${DIM}Tip: add/remove support --no-restart flag for scripting${NC}"
     echo ""
     echo -e "  ${BOLD}Upstream Routing:${NC}"
@@ -5330,6 +5360,11 @@ cli_main() {
                     check_root
                     [ -z "$1" ] && { log_error "Usage: mtproxymax secret reenable <label>"; return 1; }
                     secret_reenable "$1"
+                    ;;
+                reset-traffic)
+                    check_root
+                    [ -z "$1" ] && { log_error "Usage: mtproxymax secret reset-traffic <label|all>"; return 1; }
+                    secret_reset_traffic "$1"
                     ;;
                 note)
                     local label="$1"; shift 2>/dev/null || true
