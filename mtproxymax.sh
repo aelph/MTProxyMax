@@ -24,8 +24,8 @@ CONNECTION_LOG="${INSTALL_DIR}/connection.log"
 INSTANCES_FILE="${INSTALL_DIR}/instances.conf"
 CONTAINER_NAME="mtproxymax"
 DOCKER_IMAGE_BASE="mtproxymax-telemt"
-TELEMT_MIN_VERSION="3.3.31"
-TELEMT_COMMIT="aed7ba1"  # Pinned: v3.3.31 — build optimizations, unknown SNI logged as WARN
+TELEMT_MIN_VERSION="3.3.32"
+TELEMT_COMMIT="a383efc"  # Pinned: v3.3.32 — hybrid loop, ArcSwap snapshots, ME decomposition
 GITHUB_REPO="SamNet-dev/MTProxyMax"
 REGISTRY_IMAGE="ghcr.io/samnet-dev/mtproxymax-telemt"
 
