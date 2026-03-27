@@ -24,8 +24,12 @@ CONNECTION_LOG="${INSTALL_DIR}/connection.log"
 INSTANCES_FILE="${INSTALL_DIR}/instances.conf"
 CONTAINER_NAME="mtproxymax"
 DOCKER_IMAGE_BASE="mtproxymax-telemt"
-TELEMT_MIN_VERSION="3.3.32"
-TELEMT_COMMIT="a383efc"  # Pinned: v3.3.32 — hybrid loop, ArcSwap snapshots, ME decomposition
+# Прод-синхронизация: сохраняем старый пин в комментарии для быстрого отката.
+# TELEMT_MIN_VERSION="3.3.32"
+# TELEMT_COMMIT="a383efc"  # Pinned: v3.3.32 — hybrid loop, ArcSwap snapshots, ME decomposition
+# Прод-версия telemt, которая используется на рабочем сервере.
+TELEMT_MIN_VERSION="3.3.31"
+TELEMT_COMMIT="aed7ba1"  # Pinned: v3.3.31 — build optimizations, unknown SNI logged as WARN
 GITHUB_REPO="SamNet-dev/MTProxyMax"
 REGISTRY_IMAGE="ghcr.io/samnet-dev/mtproxymax-telemt"
 
@@ -283,7 +287,8 @@ read_choice() {
     local prompt="${1:-choice}"
     local default="${2:-}"
     # Drain any stale input (e.g., leftover escape-sequence bytes)
-    read -rsn 256 -t 0.05 _ 2>/dev/null || true
+    # Прод-правка: отключено, чтобы не терять первый ввод после переключения меню.
+    # read -rsn 256 -t 0.05 _ 2>/dev/null || true
     echo -en "\n  ${DIM}Enter ${prompt,,}${NC}" >&2
     [ -n "$default" ] && echo -en " ${DIM}[${default}]${NC}" >&2
     echo -en "${DIM}:${NC} " >&2
@@ -310,7 +315,8 @@ press_any_key() {
     echo -en "  ${DIM}Press any key to continue...${NC}"
     read -rsn1
     # Drain leftover bytes from multi-byte keys (arrow/function keys send escape sequences)
-    read -rsn 256 -t 0.05 _ 2>/dev/null || true
+    # Прод-правка: отключено по фактическому поведению TTY в проде.
+    # read -rsn 256 -t 0.05 _ 2>/dev/null || true
     echo ""
 }
 
@@ -1063,11 +1069,16 @@ tls = true
 [general.links]
 show = [$(get_enabled_labels_quoted)]
 # public_host = ""
+# Прод-правка: в ссылках фиксируем выделенный IP MTProxy.
+public_host = "62.60.253.187" # doesnt matter
 # public_port = ${port}
 
 [server]
 port = ${port}
-listen_addr_ipv4 = "0.0.0.0"
+# listen_addr_ipv4 = "0.0.0.0"
+# Прод-правка: слушаем только адрес MTProxy, чтобы не конфликтовать с Xray на .66.
+listen_addr_ipv4 = "62.60.253.187"
+# out_ipv4 = "62.60.253.187" # dont work
 listen_addr_ipv6 = "::"
 proxy_protocol = ${PROXY_PROTOCOL:-false}
 $([ "$PROXY_PROTOCOL" = "true" ] && [ -n "$PROXY_PROTOCOL_TRUSTED_CIDRS" ] && echo "proxy_protocol_trusted_cidrs = [$(echo "$PROXY_PROTOCOL_TRUSTED_CIDRS" | sed 's/[[:space:]]*,[[:space:]]*/", "/g;s/^/"/;s/$/"/' )]")
@@ -1082,7 +1093,8 @@ client_ack = 90
 
 [censorship]
 tls_domain = "${domain}"
-unknown_sni_action = "mask"
+# Прод-правка: оставлено выключенным, чтобы не менять текущую модель маскировки.
+# unknown_sni_action = "mask"
 mask = ${mask_enabled}
 mask_port = ${mask_port}
 $([ "$mask_enabled" = "true" ] && [ -n "$mask_host" ] && echo "mask_host = \"${mask_host}\"")
@@ -1315,7 +1327,10 @@ get_cumulative_proxy_stats() {
     [[ "${snap_out:-0}" =~ ^[0-9]+$ ]] || snap_out=0
 
     local live_in=0 live_out=0 conns=0
-    read -r live_in live_out conns <<< "$(get_proxy_stats)"
+    # Прод-правка: оставляем старый вариант закомментированным для совместимости.
+    # read -r live_in live_out conns <<< "$(get_proxy_stats)"
+    # Используем process substitution (стабильнее для сложного вывода).
+    read -r live_in live_out conns < <(get_proxy_stats)
 
     local delta_in=$((live_in - snap_in))
     local delta_out=$((live_out - snap_out))
@@ -1376,7 +1391,10 @@ get_cumulative_user_stats() {
 
     # Get current live Prometheus values
     local live_in=0 live_out=0 live_conns=0
-    read -r live_in live_out live_conns <<< "$(get_user_stats "$user" 2>/dev/null)"
+    # Прод-правка: сохраняем старый синтаксис в комментарии.
+    # read -r live_in live_out live_conns <<< "$(get_user_stats "$user" 2>/dev/null)"
+    # Используем process substitution для единообразия и надёжности.
+    read -r live_in live_out live_conns < <(get_user_stats "$user" 2>/dev/null)
 
     # Compute delta since last save
     # If live < snapshot, a restart happened — delta is just the live value
@@ -2609,7 +2627,8 @@ run_proxy_container() {
             log_info "Port ${PROXY_PORT} is in use by MTProxyMax"
         else
             log_error "Port ${PROXY_PORT} is already in use by another process"
-            return 1
+            # Прод-правка: не выходим сразу, чтобы дойти до пересоздания контейнера.
+            # return 1
         fi
     fi
 
@@ -4521,7 +4540,8 @@ run_installer() {
     echo ""
     echo -en "  ${DIM}Press any key to open the management menu...${NC}"
     read -rsn1
-    read -rsn 256 -t 0.05 _ 2>/dev/null || true
+    # Прод-правка: отключено, чтобы не съедать следующий ввод после установки.
+    # read -rsn 256 -t 0.05 _ 2>/dev/null || true
     load_settings
     load_secrets
     show_main_menu
@@ -5019,7 +5039,10 @@ show_status_json() {
     if is_proxy_running; then
         status="running"
         uptime_secs=$(get_proxy_uptime 2>/dev/null) || uptime_secs=0
-        read -r traffic_in traffic_out connections <<< "$(get_cumulative_proxy_stats)"
+        # Прод-правка: старый вариант оставлен в комментарии.
+        # read -r traffic_in traffic_out connections <<< "$(get_cumulative_proxy_stats)"
+        # Новый вариант чтения статистики через process substitution.
+        read -r traffic_in traffic_out connections < <(get_cumulative_proxy_stats)
     fi
 
     _load_all_cumulative_user_stats 2>/dev/null
@@ -5208,7 +5231,10 @@ show_status() {
         up_secs=$(get_proxy_uptime)
         uptime_str=$(format_duration "$up_secs")
 
-        read -r traffic_in traffic_out connections <<< "$(get_cumulative_proxy_stats)"
+        # Прод-правка: старый способ чтения сохранён в комментарии.
+        # read -r traffic_in traffic_out connections <<< "$(get_cumulative_proxy_stats)"
+        # Единый способ чтения для всех блоков статуса.
+        read -r traffic_in traffic_out connections < <(get_cumulative_proxy_stats)
     else
         status_str=$(draw_status stopped)
         uptime_str="—"
@@ -5598,7 +5624,10 @@ cli_main() {
             echo ""
             draw_header "TRAFFIC"
             local t_in t_out conns
-            read -r t_in t_out conns <<< "$(get_cumulative_proxy_stats)"
+            # Прод-правка: старый способ сохранён ниже.
+            # read -r t_in t_out conns <<< "$(get_cumulative_proxy_stats)"
+            # Новый способ чтения статистики.
+            read -r t_in t_out conns < <(get_cumulative_proxy_stats)
             # Batch-load all user stats
             _load_all_cumulative_user_stats 2>/dev/null
             echo ""
@@ -5986,7 +6015,10 @@ show_main_menu() {
             local up_secs=$(( $(date +%s) - _cached_start_epoch ))
             uptime_str=$(format_duration "$up_secs")
             # Parse all stats fields in a single read (no awk subprocesses)
-            read -r traffic_in traffic_out connections <<< "$(get_cumulative_proxy_stats)"
+            # Прод-правка: старый синтаксис оставлен в комментарии.
+            # read -r traffic_in traffic_out connections <<< "$(get_cumulative_proxy_stats)"
+            # Читаем значения через process substitution.
+            read -r traffic_in traffic_out connections < <(get_cumulative_proxy_stats)
         else
             status_str=$(draw_status stopped)
             uptime_str="—"
@@ -6548,7 +6580,10 @@ show_traffic_menu() {
     fi
 
     local t_in t_out conns
-    read -r t_in t_out conns <<< "$(get_cumulative_proxy_stats)"
+    # Прод-правка: сохранён старый вариант чтения.
+    # read -r t_in t_out conns <<< "$(get_cumulative_proxy_stats)"
+    # Текущий рабочий вариант чтения статистики.
+    read -r t_in t_out conns < <(get_cumulative_proxy_stats)
 
     # Batch-load all user stats in one pass
     _load_all_cumulative_user_stats 2>/dev/null
