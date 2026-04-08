@@ -109,7 +109,7 @@ PROXY_CONCURRENCY=8192
 PROXY_CPUS=""
 PROXY_MEMORY=""
 CUSTOM_IP=""
-FAKE_CERT_LEN=2048
+FAKE_CERT_LEN=512
 PROXY_PROTOCOL="false"
 PROXY_PROTOCOL_TRUSTED_CIDRS=""
 AD_TAG=""
@@ -1098,7 +1098,7 @@ tls_domain = "${domain}"
 mask = ${mask_enabled}
 mask_port = ${mask_port}
 $([ "$mask_enabled" = "true" ] && [ -n "$mask_host" ] && echo "mask_host = \"${mask_host}\"")
-fake_cert_len = ${FAKE_CERT_LEN:-2048}
+fake_cert_len = ${FAKE_CERT_LEN:-512}
 # Note: geo-blocking is enforced at the host firewall level (iptables/nftables),
 # not via telemt config. See: mtproxymax info -> Geo-Blocking
 
